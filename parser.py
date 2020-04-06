@@ -75,23 +75,3 @@ try:
 except:
     print("------------------------------- An ERROR OCCURED! -----------------------------")
         
-
-
-# body = driver.find_element_by_tag_name("body")
-# counter=0
-# while(counter < 10):
-#     body.send_keys(Keys.PAGE_DOWN)
-#     time.sleep(0.5)
-#     counter=counter+1
-# tweets = driver.find_elements_by_xpath("//div[@data-testid=\"tweet\"]//div[@lang=\"ru\"]/span")
-# for tweet in tweets:
-#     tweet_text = driver.execute_script("return arguments[0].textContent", tweet)
-#     print(tweet_text + "\n\n")
-# driver.close()
-
-# tweetCriteria = got.manager.TweetCriteria().setUsername(userNameText).setMaxTweets(10)
-# tweets = got.manager.TweetManager.getTweets(tweetCriteria)
-# for tweet in tweets:
-#     print("Username : " + tweet.username + " \n")
-#     print("Date: " + tweet.date.strftime("%d:%m:%Y") + "\n")
-#     print("Tweet : " + tweet.text + " \n")
