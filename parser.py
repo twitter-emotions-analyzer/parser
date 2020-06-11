@@ -12,20 +12,33 @@ from datetime import datetime
 import json
 import psycopg2
 import pika
+from random import randrange
 end_msg_recieved = False
 
 def message_received(channel, method, properties, body):
-   print(body) 
    print("Message recieved")
+   print(body) 
+   if (body=='{"action": "end"}'):
+       channel.stop_consuming()
+       print("End recieved")
 
 def ParseTweets(username):
 
     reload(sys)  
     sys.setdefaultencoding('utf-8')
     allTweetsJson = []
+
+    #rabbit_conn = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+    #rabbit_channel = rabbit_conn.channel()
+    #rabbit_channel.exchange_declare(exchange="rater.out", exchange_type="topic")
+    #rabbit_channel.queue_declare(queue="rater.out")
+    #rabbit_channel.queue_bind(exchange="rater.out", queue="rater.out", routing_key="rater.out")
+    #rabbit_channel.basic_consume(queue="rater.out", on_message_callback=message_received, auto_ack=True)
+    #rabbit_channel.start_consuming()
+    #rabbit_conn.close()
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--window-size=400,100")
+    chrome_options.add_argument("--window-size=400,150")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     
@@ -36,7 +49,7 @@ def ParseTweets(username):
         cursor = conn.cursor()
         cursor.execute('DROP TABLE IF EXISTS tweets')
         cursor.execute('CREATE TABLE tweets (id serial PRIMARY KEY, tweet_text text, username text, emotion text, date timestamp);')
-        cursor.execute('DELETE FROM user_rate')
+        cursor.execute('DELETE FROM tmp_user_rate')
         conn.commit()
 
         print("Table initialized")
@@ -73,6 +86,7 @@ def ParseTweets(username):
         followerNameSpans = driver.find_elements_by_xpath("//body//a[@role=\"link\"]//div[@dir=\"ltr\"]/span")
         followerNameTexts = []
         print(len(followerNameSpans))
+        followerNameTexts.append(username)
         for followerNameSpan in followerNameSpans:
             followerNameTexts.append(driver.execute_script("return arguments[0].textContent", followerNameSpan)[1:])
         print("Got follower names")
@@ -82,12 +96,15 @@ def ParseTweets(username):
         peopleCounter = 0
         for followerName in followerNameTexts:
             print("Running cycle for follower")
-            if peopleCounter > 2:
+            if peopleCounter > 5:
                 break
             #Print persons tweets
             print("Follower Name: " + followerName)
-            tweetCriteria = got.manager.TweetCriteria().setUsername(followerName).setMaxTweets(1)
+            tweetCriteria = got.manager.TweetCriteria().setUsername(followerName).setMaxTweets(randrange(1,3))
             tweets = got.manager.TweetManager.getTweets(tweetCriteria)
+            if (len(tweets) == 0):
+                print("No tweets")
+                continue
             for tweet in tweets:
                 print("user: " + tweet.username + " Tweet: " + tweet.text + "\n")
                 allTweetsJson.append({'username': tweet.username, 'tweet': tweet.text, 'emotion': ""})
@@ -119,8 +136,11 @@ def ParseTweets(username):
                 newFollowerNameTexts.append(driver.execute_script("return arguments[0].textContent", newFollowerNameSpan)[1:])
             for newFollowerName in newFollowerNameTexts:
                 print("!!!!!!! NEW FOLLOWER CYCLE FOR USER " + newFollowerName)
-                newTweetCriteria = got.manager.TweetCriteria().setUsername(newFollowerName).setMaxTweets(1)
+                newTweetCriteria = got.manager.TweetCriteria().setUsername(newFollowerName).setMaxTweets(randrange(1,3))
                 newTweets = got.manager.TweetManager.getTweets(newTweetCriteria)
+                if (len(newTweets) == 0):
+                    print("No tweets")
+                    continue
                 for newTweet in newTweets:
                     allTweetsJson.append({'username': newTweet.username, 'tweet': newTweet.text, 'emotion': ""})
                     print("user: " + newTweet.username + " Tweet: " + newTweet.text + "\n")
@@ -132,12 +152,12 @@ def ParseTweets(username):
                     rabbit_msg = {
                         'id': user_db_id
                     }
-                    #rabbit_channel.basic_publish(exchange='rater', routing_key='tweets', body=json.dumps(rabbit_msg))
+                    rabbit_channel.basic_publish(exchange='rater', routing_key='tweets', body=json.dumps(rabbit_msg))
 
                 rabbit_msg_user = {
                     'username': newFollowerName
                 }
-                #rabbit_channel.basic_publish(exchange='rater', routing_key='user', body=json.dumps(rabbit_msg_user))
+                rabbit_channel.basic_publish(exchange='rater', routing_key='user', body=json.dumps(rabbit_msg_user))
         print("ended")
         driver.close()
         end_msg = {
@@ -147,12 +167,33 @@ def ParseTweets(username):
         rabbit_channel.exchange_declare(exchange="rater.out", exchange_type="topic")
         rabbit_channel.queue_declare(queue="rater.out")
         rabbit_channel.queue_bind(exchange="rater.out", queue="rater.out", routing_key="rater.out")
-        rabbit_channel.basic_consume(queue="rater.out", on_message_callback=message_received)
+        rabbit_channel.basic_consume(queue="rater.out", on_message_callback=message_received, auto_ack=True)
         rabbit_channel.start_consuming()
+
+        
+        time.sleep(10)
+        cursor.execute("SELECT * FROM tmp_user_rate;");
+        all_user_rates = []
+        user_rates = cursor.fetchall()
+        print(user_rates)
+        for user_rate in user_rates:
+            username_in_rate = user_rate[1]
+            cursor.execute("SELECT COUNT(*) FROM tweets WHERE username=\'" + username + "\';")
+            tweets_count = int(cursor.fetchone()[0])
+            user_rate_json = {
+                    'username': username_in_rate,
+                    'userRate': user_rate[2],
+                    'tweetsCount': tweets_count
+            }
+            all_user_rates.append(user_rate_json)
         cursor.close()
         conn.close()
         rabbit_conn.close()
-        return allTweetsJson
+        rates_and_tweets = {
+                'userRates': all_user_rates,
+                'tweets': allTweetsJson
+        }
+        return rates_and_tweets
     except Exception as ex:
         print(ex)
         print("Exception occured")
@@ -163,7 +204,6 @@ def ParseTweets(username):
 
 
 
-#ParseTweets("NikolaiBaskov")
 # body = driver.find_element_by_tag_name("body")
 # counter=0
 # while(counter < 10):

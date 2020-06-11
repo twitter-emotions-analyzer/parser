@@ -16,3 +16,9 @@ th {
 td {
     border: 1px solid black;
 }
+
+#chart {
+	width: 500px !important;
+	height: 400px !important;
+}
+
